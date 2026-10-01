@@ -1,8 +1,8 @@
 ﻿$BaseUrl = "http://localhost:5000/api/auth"
 
-$Email = "aryaa@mail.com"
-$Password = "secret1234"
-$Name = "Test User"
+$Email = "aryaaa@mail.com"
+$Password = "secret12345"
+$Name = "stest arya"
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host " AUTH API TEST" -ForegroundColor Cyan

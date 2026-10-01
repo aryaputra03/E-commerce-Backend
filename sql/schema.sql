@@ -44,3 +44,16 @@ create table if not exists products (
 
 create index if not exists idx_products_category_id on products(category_id);
 create index if not exists idx_products_name on products using gin (to_tsvector('simple', name));
+
+-- Tabel cart_items
+create table if not exists cart_items (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id) on delete cascade,
+  product_id uuid not null references products(id) on delete cascade,
+  quantity int not null check (quantity > 0),
+  created_at timestamp default now(),
+  updated_at timestamp default now(),
+  unique (user_id, product_id) -- 1 user cuma punya 1 baris per produk, kalau nambah lagi ya quantity-nya yang naik
+);
+
+create index if not exists idx_cart_items_user_id on cart_items(user_id);
