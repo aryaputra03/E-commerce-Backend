@@ -23,3 +23,24 @@ create table if not exists refresh_tokens (
 
 create index if not exists idx_refresh_tokens_user_id on refresh_tokens(user_id);
 create index if not exists idx_refresh_tokens_token_hash on refresh_tokens(token_hash);
+
+-- Tabel categories
+create table if not exists categories (
+  id uuid primary key default gen_random_uuid(),
+  name varchar(100) not null unique
+);
+
+-- Tabel products
+create table if not exists products (
+  id uuid primary key default gen_random_uuid(),
+  category_id uuid references categories(id) on delete set null,
+  name varchar(150) not null,
+  description text,
+  price numeric(12,2) not null check (price >= 0),
+  stock int not null default 0 check (stock >= 0),
+  image_url text,
+  created_at timestamp default now()
+);
+
+create index if not exists idx_products_category_id on products(category_id);
+create index if not exists idx_products_name on products using gin (to_tsvector('simple', name));

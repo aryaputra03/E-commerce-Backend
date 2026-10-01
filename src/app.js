@@ -4,6 +4,7 @@ const cors = require("cors");
 const morgan = require("morgan");
 
 const authRoutes = require("./routes/auth.routes");
+const productRoutes = require("./routes/product.routes"); // baru
 const errorHandlerMiddleware = require("./middlewares/errorHandler.middleware");
 
 const app = express();
@@ -16,6 +17,7 @@ app.use(express.json());
 
 // Routes
 app.use("/api/auth", authRoutes);
+app.use("/api", productRoutes); // baru — sudah include /products dan /categories di dalamnya
 
 // Health check sederhana
 app.get("/", (req, res) => {
