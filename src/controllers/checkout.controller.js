@@ -1,14 +1,14 @@
 const pool = require("../config/pg");
 const supabase = require("../config/supabase");
+const { createPaymentTransaction } = require("../services/midtrans.service");
 const { success, error } = require("../utils/response");
 
 // POST /api/checkout
 async function checkout(req, res, next) {
   const userId = req.user.id;
-  let client; // dideklarasikan di luar try supaya bisa di-release di catch juga
+  let client;
 
   try {
-    // 1. Ambil isi cart dulu lewat Supabase client biasa
     const { data: cartItems, error: cartError } = await supabase
       .from("cart_items")
       .select("product_id, quantity")
@@ -20,20 +20,19 @@ async function checkout(req, res, next) {
       return error(res, 400, "Keranjang kosong, tidak bisa checkout");
     }
 
-    // 2. Urutkan berdasarkan product_id untuk mencegah deadlock
     const sortedItems = [...cartItems].sort((a, b) =>
       a.product_id > b.product_id ? 1 : -1,
     );
 
-    // 3. BARU di sini kita ambil koneksi dari pool — kalau gagal, langsung ketangkap catch di bawah
     client = await pool.connect();
     await client.query("BEGIN");
 
     const lockedItems = [];
 
     for (const item of sortedItems) {
+      // Sekarang ikut SELECT "name" — dipakai nanti untuk item_details Midtrans
       const result = await client.query(
-        "SELECT id, stock, price FROM products WHERE id = $1 FOR UPDATE",
+        "SELECT id, name, stock, price FROM products WHERE id = $1 FOR UPDATE",
         [item.product_id],
       );
 
@@ -59,6 +58,7 @@ async function checkout(req, res, next) {
 
       lockedItems.push({
         product_id: item.product_id,
+        name: product.name,
         quantity: item.quantity,
         price: Number(product.price),
       });
@@ -94,12 +94,58 @@ async function checkout(req, res, next) {
 
     await client.query("COMMIT");
 
-    // Kosongkan cart SETELAH commit sukses
     await supabase.from("cart_items").delete().eq("user_id", userId);
+
+    // --- Mulai bagian baru Fase 5: generate payment link Midtrans ---
+    // Ini SENGAJA di LUAR transaction pg di atas — order & stock sudah final (committed),
+    // tidak boleh di-ROLLBACK lagi hanya karena Midtrans lagi down. Kalau gagal generate
+    // payment link, order tetap ada (status 'pending'), cuma payment-nya null — bisa di-retry nanti.
+    let paymentInfo = null;
+    try {
+      const { data: customer } = await supabase
+        .from("users")
+        .select("name, email")
+        .eq("id", userId)
+        .single();
+
+      const transaction = await createPaymentTransaction(
+        order,
+        lockedItems,
+        customer,
+      );
+
+      const { data: payment, error: paymentInsertError } = await supabase
+        .from("payments")
+        .insert({
+          order_id: order.id,
+          midtrans_order_id: order.id,
+          status: "pending",
+          payment_url: transaction.redirect_url,
+          raw_payload: transaction,
+        })
+        .select()
+        .single();
+
+      if (paymentInsertError) throw paymentInsertError;
+
+      paymentInfo = {
+        redirect_url: payment.payment_url,
+        token: transaction.token,
+      };
+    } catch (paymentErr) {
+      console.error(
+        "Gagal generate payment link Midtrans:",
+        paymentErr.message,
+      );
+      // Tidak melempar error ke next() di sini — order tetap dianggap berhasil dibuat.
+      // paymentInfo tetap null, frontend bisa kasih tombol "coba generate payment lagi".
+    }
+    // --- Selesai bagian baru ---
 
     return success(res, 201, "Checkout berhasil, order dibuat", {
       order,
       items: lockedItems,
+      payment: paymentInfo,
     });
   } catch (err) {
     if (client) {
@@ -107,8 +153,6 @@ async function checkout(req, res, next) {
     }
     next(err);
   } finally {
-    // finally memastikan koneksi SELALU dilepas ke pool, apa pun yang terjadi di atas —
-    // baik sukses, early return (400/404/409), maupun error tak terduga.
     if (client) {
       client.release();
     }

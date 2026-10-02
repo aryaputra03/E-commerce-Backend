@@ -78,3 +78,17 @@ create table if not exists order_items (
 
 create index if not exists idx_orders_user_id on orders(user_id);
 create index if not exists idx_order_items_order_id on order_items(order_id);
+
+-- Tabel payments
+create table if not exists payments (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references orders(id) on delete cascade,
+  midtrans_order_id varchar(100) unique not null,
+  status varchar(20) not null default 'pending', -- pending | paid | failed | cancelled
+  payment_url text,
+  raw_payload jsonb,
+  created_at timestamp default now()
+);
+
+create index if not exists idx_payments_order_id on payments(order_id);
+create index if not exists idx_payments_midtrans_order_id on payments(midtrans_order_id);
