@@ -7,13 +7,37 @@ const authMiddleware = require("../middlewares/auth.middleware");
 const requireRole = require("../middlewares/role.middleware");
 const handleValidationErrors = require("../middlewares/validator.middleware");
 
-// Rule validasi dipakai bersama untuk create & update produk
+// Rule validasi untuk CREATE produk — semua field wajib ada
 const productRules = [
   body("name").trim().notEmpty().withMessage("Nama produk wajib diisi"),
   body("price")
     .isFloat({ gt: 0 })
     .withMessage("Price harus angka lebih dari 0"),
   body("stock").isInt({ min: 0 }).withMessage("Stock harus angka >= 0"),
+  body("category_id")
+    .optional({ nullable: true })
+    .isUUID()
+    .withMessage("category_id harus UUID valid"),
+  body("description").optional().isString(),
+  body("image_url").optional().isURL().withMessage("image_url harus URL valid"),
+];
+
+// Rule validasi untuk UPDATE produk — semua field opsional (partial update),
+// tapi KALAU dikirim, tetap divalidasi tipe/formatnya.
+const updateProductRules = [
+  body("name")
+    .optional()
+    .trim()
+    .notEmpty()
+    .withMessage("Nama produk tidak boleh kosong"),
+  body("price")
+    .optional()
+    .isFloat({ gt: 0 })
+    .withMessage("Price harus angka lebih dari 0"),
+  body("stock")
+    .optional()
+    .isInt({ min: 0 })
+    .withMessage("Stock harus angka >= 0"),
   body("category_id")
     .optional({ nullable: true })
     .isUUID()
@@ -45,7 +69,10 @@ router.put(
   "/products/:id",
   authMiddleware,
   requireRole("admin"),
-  [param("id").isUUID().withMessage("id produk tidak valid"), ...productRules],
+  [
+    param("id").isUUID().withMessage("id produk tidak valid"),
+    ...updateProductRules,
+  ],
   handleValidationErrors,
   productController.updateProduct,
 );

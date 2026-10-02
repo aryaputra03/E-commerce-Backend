@@ -57,3 +57,24 @@ create table if not exists cart_items (
 );
 
 create index if not exists idx_cart_items_user_id on cart_items(user_id);
+
+-- Tabel orders
+create table if not exists orders (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references users(id),
+  status varchar(20) not null default 'pending', -- pending | paid | shipped | completed | cancelled | failed
+  total_amount numeric(12,2) not null,
+  created_at timestamp default now()
+);
+
+-- Tabel order_items
+create table if not exists order_items (
+  id uuid primary key default gen_random_uuid(),
+  order_id uuid not null references orders(id) on delete cascade,
+  product_id uuid not null references products(id),
+  quantity int not null,
+  price_at_time numeric(12,2) not null -- snapshot harga saat checkout, bukan harga produk sekarang
+);
+
+create index if not exists idx_orders_user_id on orders(user_id);
+create index if not exists idx_order_items_order_id on order_items(order_id);

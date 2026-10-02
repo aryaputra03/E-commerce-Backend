@@ -102,17 +102,17 @@ async function createProduct(req, res, next) {
   }
 }
 
-// PUT /api/products/:id (admin)
+// PUT /api/products/:id (admin) — sekarang mendukung partial update:
+// field yang tidak dikirim di body akan dipertahankan nilai lamanya.
 async function updateProduct(req, res, next) {
   try {
     const { id } = req.params;
     const { name, description, price, stock, category_id, image_url } =
       req.body;
 
-    // Cek produk ada dulu supaya bisa balas 404 yang jelas, bukan silently no-op
     const { data: existing } = await supabase
       .from("products")
-      .select("id")
+      .select("*")
       .eq("id", id)
       .maybeSingle();
 
@@ -120,9 +120,22 @@ async function updateProduct(req, res, next) {
       return error(res, 404, "Produk tidak ditemukan");
     }
 
+    // Kalau field tidak dikirim (undefined), pakai nilai yang sudah ada di database.
+    // Ini yang membuat PUT bisa dipakai untuk update sebagian field saja.
+    const updatedFields = {
+      name: name !== undefined ? name : existing.name,
+      description:
+        description !== undefined ? description : existing.description,
+      price: price !== undefined ? price : existing.price,
+      stock: stock !== undefined ? stock : existing.stock,
+      category_id:
+        category_id !== undefined ? category_id : existing.category_id,
+      image_url: image_url !== undefined ? image_url : existing.image_url,
+    };
+
     const { data, error: updateError } = await supabase
       .from("products")
-      .update({ name, description, price, stock, category_id, image_url })
+      .update(updatedFields)
       .eq("id", id)
       .select()
       .single();

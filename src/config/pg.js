@@ -1,12 +1,13 @@
 const { Pool } = require("pg");
 require("dotenv").config();
 
-// Pool koneksi langsung ke PostgreSQL, dipakai khusus untuk raw query
-// yang butuh transaction eksplisit (BEGIN/COMMIT/ROLLBACK) dan row locking (FOR UPDATE).
-// Fase 1 belum dipakai — baru aktif dipakai di checkout.controller.js (Fase 4).
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // Supabase butuh SSL
+  host: process.env.PGHOST,
+  port: Number(process.env.PGPORT) || 5432,
+  database: process.env.PGDATABASE || "postgres",
+  user: process.env.PGUSER || "postgres",
+  password: process.env.PGPASSWORD,
+  ssl: { rejectUnauthorized: false }, // Supabase mewajibkan koneksi SSL
 });
 
 pool.on("error", (err) => {
