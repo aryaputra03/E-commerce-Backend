@@ -5,7 +5,8 @@
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "worker:expiry": "node workers/order-expiry.js"
   },
   "license": "MIT",
   "dependencies": {

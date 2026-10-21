@@ -7,9 +7,8 @@ const snap = new midtransClient.Snap({
   clientKey: process.env.MIDTRANS_CLIENT_KEY,
 });
 
-// Generate Snap token + redirect_url (halaman pembayaran) untuk 1 order yang baru dibuat.
-// order_id yang dikirim ke Midtrans = order.id kita sendiri — supaya gampang dicocokkan balik
-// tanpa perlu tabel mapping terpisah saat webhook datang.
+const EXPIRY_MINUTES = Number(process.env.ORDER_EXPIRY_MINUTES) || 60;
+
 async function createPaymentTransaction(order, items, customer) {
   const parameter = {
     transaction_details: {
@@ -26,9 +25,14 @@ async function createPaymentTransaction(order, items, customer) {
       quantity: item.quantity,
       name: item.name,
     })),
+    // BARU: batas waktu pembayaran di sisi Midtrans — nilainya dari ORDER_EXPIRY_MINUTES
+    // yang sama dipakai worker order-expiry, supaya keduanya sinkron.
+    expiry: {
+      unit: "minutes",
+      duration: EXPIRY_MINUTES,
+    },
   };
 
-  // transaction berisi { token, redirect_url }
   const transaction = await snap.createTransaction(parameter);
   return transaction;
 }
