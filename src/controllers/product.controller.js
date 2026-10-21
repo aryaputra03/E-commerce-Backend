@@ -2,7 +2,6 @@ const supabase = require("../config/supabase");
 const { success, error } = require("../utils/response");
 
 // GET /api/products
-// Query params: page, limit, category_id, min_price, max_price, search
 async function getProducts(req, res, next) {
   try {
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
@@ -11,12 +10,9 @@ async function getProducts(req, res, next) {
       100,
     );
     const { category_id, min_price, max_price, search } = req.query;
-
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
-    // count: 'exact' bikin Supabase sekaligus hitung total row yang cocok filter,
-    // supaya kita bisa kirim total_pages ke client tanpa query kedua.
     let query = supabase
       .from("products")
       .select(
@@ -24,20 +20,13 @@ async function getProducts(req, res, next) {
         {
           count: "exact",
         },
-      );
+      )
+      .eq("is_active", true); // baru — produk yang di-soft-delete tidak pernah muncul di katalog publik
 
-    if (category_id) {
-      query = query.eq("category_id", category_id);
-    }
-    if (min_price) {
-      query = query.gte("price", Number(min_price));
-    }
-    if (max_price) {
-      query = query.lte("price", Number(max_price));
-    }
-    if (search) {
-      query = query.ilike("name", `%${search}%`);
-    }
+    if (category_id) query = query.eq("category_id", category_id);
+    if (min_price) query = query.gte("price", Number(min_price));
+    if (max_price) query = query.lte("price", Number(max_price));
+    if (search) query = query.ilike("name", `%${search}%`);
 
     query = query.order("created_at", { ascending: false }).range(from, to);
 
@@ -69,6 +58,7 @@ async function getProductById(req, res, next) {
         "id, name, description, price, stock, image_url, category_id, created_at",
       )
       .eq("id", id)
+      .eq("is_active", true) // baru
       .maybeSingle();
 
     if (queryError) throw queryError;
@@ -102,8 +92,7 @@ async function createProduct(req, res, next) {
   }
 }
 
-// PUT /api/products/:id (admin) — sekarang mendukung partial update:
-// field yang tidak dikirim di body akan dipertahankan nilai lamanya.
+// PUT /api/products/:id (admin) — partial update, tetap seperti sebelumnya
 async function updateProduct(req, res, next) {
   try {
     const { id } = req.params;
@@ -115,13 +104,10 @@ async function updateProduct(req, res, next) {
       .select("*")
       .eq("id", id)
       .maybeSingle();
-
     if (!existing) {
       return error(res, 404, "Produk tidak ditemukan");
     }
 
-    // Kalau field tidak dikirim (undefined), pakai nilai yang sudah ada di database.
-    // Ini yang membuat PUT bisa dipakai untuk update sebagian field saja.
     const updatedFields = {
       name: name !== undefined ? name : existing.name,
       description:
@@ -149,6 +135,9 @@ async function updateProduct(req, res, next) {
 }
 
 // DELETE /api/products/:id (admin)
+// DIUBAH: dulu DELETE sungguhan (gagal kalau produk pernah dipesan, karena foreign key
+// dari order_items). Sekarang SOFT DELETE — produk cuma ditandai tidak aktif, baris aslinya
+// tetap ada supaya riwayat order lama (order_items) tetap bisa dibaca utuh.
 async function deleteProduct(req, res, next) {
   try {
     const { id } = req.params;
@@ -157,17 +146,18 @@ async function deleteProduct(req, res, next) {
       .from("products")
       .select("id")
       .eq("id", id)
+      .eq("is_active", true)
       .maybeSingle();
 
     if (!existing) {
       return error(res, 404, "Produk tidak ditemukan");
     }
 
-    const { error: deleteError } = await supabase
+    const { error: updateError } = await supabase
       .from("products")
-      .delete()
+      .update({ is_active: false })
       .eq("id", id);
-    if (deleteError) throw deleteError;
+    if (updateError) throw updateError;
 
     return success(res, 200, "Produk berhasil dihapus");
   } catch (err) {
@@ -203,7 +193,6 @@ async function createCategory(req, res, next) {
       .single();
 
     if (insertError) {
-      // kode 23505 = unique constraint violation di Postgres (nama kategori dobel)
       if (insertError.code === "23505") {
         return error(res, 409, "Nama kategori sudah ada");
       }

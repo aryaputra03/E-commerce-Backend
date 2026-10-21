@@ -1,9 +1,6 @@
 const supabase = require("../config/supabase");
 const { success, error } = require("../utils/response");
 
-// Helper internal: ambil cart user beserta detail produknya + hitung subtotal & total.
-// Dipakai berulang di getCart, addItem, updateItem, removeItem supaya response selalu konsisten
-// (setiap aksi cart langsung balikin state cart terbaru, bukan cuma "berhasil").
 async function buildCartResponse(userId) {
   const { data: items, error: queryError } = await supabase
     .from("cart_items")
@@ -40,23 +37,24 @@ async function getCart(req, res, next) {
 }
 
 // POST /api/cart/items
-// body: { product_id, quantity }
 async function addItem(req, res, next) {
   try {
     const userId = req.user.id;
     const { product_id, quantity } = req.body;
 
+    // DIUBAH: ikut select is_active. Produk yang sudah di-soft-delete diperlakukan sama
+    // seperti "tidak ditemukan" dari sudut pandang orang yang mau menambah ke cart,
+    // sesuai perilaku getProducts/getProductById yang juga menyembunyikannya.
     const { data: product } = await supabase
       .from("products")
-      .select("id, stock")
+      .select("id, stock, is_active")
       .eq("id", product_id)
       .maybeSingle();
 
-    if (!product) {
+    if (!product || !product.is_active) {
       return error(res, 404, "Produk tidak ditemukan");
     }
 
-    // Cek apakah produk ini sudah ada di cart user — kalau ada, kita tambahkan quantity-nya
     const { data: existingItem } = await supabase
       .from("cart_items")
       .select("id, quantity")
@@ -93,7 +91,6 @@ async function addItem(req, res, next) {
 }
 
 // PUT /api/cart/items/:productId
-// body: { quantity } — ini SET quantity jadi angka ini, bukan nambah
 async function updateItem(req, res, next) {
   try {
     const userId = req.user.id;
@@ -168,13 +165,11 @@ async function removeItem(req, res, next) {
 async function clearCart(req, res, next) {
   try {
     const userId = req.user.id;
-
     const { error: deleteError } = await supabase
       .from("cart_items")
       .delete()
       .eq("user_id", userId);
     if (deleteError) throw deleteError;
-
     return success(res, 200, "Keranjang berhasil dikosongkan", {
       items: [],
       total: 0,

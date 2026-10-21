@@ -30,9 +30,9 @@ async function checkout(req, res, next) {
     const lockedItems = [];
 
     for (const item of sortedItems) {
-      // Sekarang ikut SELECT "name" — dipakai nanti untuk item_details Midtrans
+      // DIUBAH: ikut SELECT is_active
       const result = await client.query(
-        "SELECT id, name, stock, price FROM products WHERE id = $1 FOR UPDATE",
+        "SELECT id, name, stock, price, is_active FROM products WHERE id = $1 FOR UPDATE",
         [item.product_id],
       );
 
@@ -46,6 +46,13 @@ async function checkout(req, res, next) {
       }
 
       const product = result.rows[0];
+
+      // BARU: produk yang sudah di-soft-delete (misal baru dinonaktifkan admin SETELAH
+      // masuk cart orang) ditolak di titik paling kritis ini — bukan cuma di addItem.
+      if (!product.is_active) {
+        await client.query("ROLLBACK");
+        return error(res, 409, `Produk "${product.name}" sudah tidak tersedia`);
+      }
 
       if (product.stock < item.quantity) {
         await client.query("ROLLBACK");
@@ -92,14 +99,14 @@ async function checkout(req, res, next) {
       );
     }
 
+    // DIUBAH: dulu ini dilakukan lewat Supabase client SETELAH commit. Sekarang jadi
+    // bagian dari transaksi pg yang sama, sebelum COMMIT — kalau transaksi di-ROLLBACK
+    // karena alasan apa pun di atas, cart ikut tidak jadi kosong (konsisten).
+    await client.query("DELETE FROM cart_items WHERE user_id = $1", [userId]);
+
     await client.query("COMMIT");
 
-    await supabase.from("cart_items").delete().eq("user_id", userId);
-
-    // --- Mulai bagian baru Fase 5: generate payment link Midtrans ---
-    // Ini SENGAJA di LUAR transaction pg di atas — order & stock sudah final (committed),
-    // tidak boleh di-ROLLBACK lagi hanya karena Midtrans lagi down. Kalau gagal generate
-    // payment link, order tetap ada (status 'pending'), cuma payment-nya null — bisa di-retry nanti.
+    // --- Generate payment link Midtrans — tetap DI LUAR transaksi pg (sengaja, seperti Fase 5) ---
     let paymentInfo = null;
     try {
       const { data: customer } = await supabase
@@ -137,10 +144,7 @@ async function checkout(req, res, next) {
         "Gagal generate payment link Midtrans:",
         paymentErr.message,
       );
-      // Tidak melempar error ke next() di sini — order tetap dianggap berhasil dibuat.
-      // paymentInfo tetap null, frontend bisa kasih tombol "coba generate payment lagi".
     }
-    // --- Selesai bagian baru ---
 
     return success(res, 201, "Checkout berhasil, order dibuat", {
       order,
