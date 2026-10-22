@@ -1,4 +1,7 @@
 const supabase = require("../config/supabase");
+const es = require("../config/elasticsearch");
+const searchService = require("../services/search.service");
+const logger = require("../utils/logger");
 const { success, error } = require("../utils/response");
 
 // GET /api/products
@@ -43,6 +46,47 @@ async function getProducts(req, res, next) {
       },
     });
   } catch (err) {
+    next(err);
+  }
+}
+
+// GET /api/products/search — dibaca dari Elasticsearch (relevansi, typo, facet).
+// Stok di hasil ini hanya INDIKATIF; cart, checkout, dan detail produk tetap membaca Postgres.
+async function searchProducts(req, res, next) {
+  try {
+    // Nilai sudah divalidasi + dikonversi (toInt/toFloat) oleh rule di product.routes.js
+    const { q, category_id, min_price, max_price } = req.query;
+    const page = req.query.page || 1;
+    const limit = req.query.limit || 10;
+
+    const { items, total, facets } = await searchService.searchProducts(es, {
+      q,
+      categoryId: category_id,
+      minPrice: min_price,
+      maxPrice: max_price,
+      page,
+      limit,
+    });
+
+    return success(res, 200, "Hasil pencarian produk", {
+      items,
+      pagination: { page, limit, total, total_pages: Math.ceil(total / limit) },
+      facets,
+    });
+  } catch (err) {
+    // ES mati / lambat / indeks belum dibuat: bukan salah client dan bukan bug server -> 503.
+    // CRUD produk dan checkout TIDAK terpengaruh karena tidak memakai Elasticsearch sama sekali.
+    if (
+      searchService.isTransientEsError(err) ||
+      searchService.isIndexMissingError(err)
+    ) {
+      logger.warn(`[${req.requestId}] search tidak tersedia: ${err.message}`);
+      return error(
+        res,
+        503,
+        "Layanan pencarian sedang tidak tersedia. Coba lagi nanti, atau gunakan GET /api/products?search=...",
+      );
+    }
     next(err);
   }
 }
@@ -207,6 +251,7 @@ async function createCategory(req, res, next) {
 
 module.exports = {
   getProducts,
+  searchProducts,
   getProductById,
   createProduct,
   updateProduct,
