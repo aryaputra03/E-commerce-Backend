@@ -8,10 +8,13 @@
     "start": "node src/server.js",
     "worker:expiry": "node workers/order-expiry.js",
     "worker:relay": "node workers/outbox-relay.js",
-    "worker:notification": "node workers/notification.js"
+    "worker:notification": "node workers/notification.js",
+    "worker:indexer": "node workers/search-indexer.js",
+    "republish": "node scripts/republish-products.js"
   },
   "license": "MIT",
   "dependencies": {
+    "@elastic/elasticsearch": "~8.15.0",
     "@supabase/supabase-js": "^2.45.4",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",

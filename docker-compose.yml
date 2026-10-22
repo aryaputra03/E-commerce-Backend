@@ -47,3 +47,34 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+  
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false" # HANYA untuk dev
+      action.auto_create_index: "-products,+*" # larang auto-create indeks products; yang lain boleh (Kibana)
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - "127.0.0.1:9200:9200" # jangan dibuka ke luar mesin
+    volumes:
+      - es-data:/usr/share/elasticsearch/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -qE 'green|yellow'"]
+      interval: 10s
+      retries: 20
+
+  kibana: # opsional untuk latihan query; nyalakan hanya saat perlu
+    image: docker.elastic.co/kibana/kibana:8.15.3
+    profiles: ["tools"]
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "127.0.0.1:5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+volumes: # tambahkan blok ini di paling bawah file (sejajar dengan `services:`)
+  es-data:
