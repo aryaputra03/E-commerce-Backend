@@ -1,5 +1,5 @@
-// Tabel transisi legal: key = status asal, value = daftar status tujuan yang diizinkan.
-// Status yang tidak ada di sini (completed, cancelled, failed) adalah status AKHIR — tidak bisa diubah lagi.
+const { enqueueOrderEvent } = require("./outbox.service"); // baru
+
 const TRANSITIONS = {
   pending: ["paid", "failed", "cancelled"],
   paid: ["shipped", "cancelled"],
@@ -11,9 +11,6 @@ const TRANSITIONS = {
 
 const RELEASE_STOCK_ON = new Set(["cancelled", "failed"]);
 
-// WAJIB dipanggil DI DALAM transaksi pg yang sudah BEGIN (client dari pool.connect()).
-// ctx.onlyFrom: kalau diisi, transisi hanya dieksekusi kalau status order SAAT INI persis
-// sama dengan ini — dipakai worker expiry supaya tidak membatalkan order yang baru saja dibayar.
 async function transitionOrder(client, orderId, toStatus, ctx = {}) {
   const { rows } = await client.query(
     "SELECT id, user_id, status FROM orders WHERE id = $1 FOR UPDATE",
@@ -27,12 +24,14 @@ async function transitionOrder(client, orderId, toStatus, ctx = {}) {
   const from = rows[0].status;
 
   if (ctx.onlyFrom && from !== ctx.onlyFrom) {
-    // Status sudah berubah duluan (misal keburu 'paid') sebelum baris ini dieksekusi -> diamkan, bukan error.
     return { ok: true, changed: false, from, to: from };
   }
 
   if (from === toStatus) {
-    // IDEMPOTENCY: status tujuan sama persis dengan status sekarang -> tidak ada yang perlu diubah.
+    // PENTING: karena baris ini return SEBELUM enqueueOrderEvent dipanggil di bawah,
+    // webhook/admin yang mengirim status yang SAMA PERSIS dengan status sekarang tidak
+    // akan pernah menghasilkan event baru. Idempotency di level order ini otomatis
+    // mencegah event duplikat terbit — bukan cuma dicegah di sisi consumer nanti.
     return { ok: true, changed: false, from, to: toStatus };
   }
 
@@ -41,9 +40,6 @@ async function transitionOrder(client, orderId, toStatus, ctx = {}) {
   }
 
   if (RELEASE_STOCK_ON.has(toStatus)) {
-    // Kunci produk BERURUTAN (sama persis seperti checkout.controller.js) — supaya kalau transaksi
-    // ini kebetulan jalan bersamaan dengan transaksi checkout lain yang mengunci produk yang sama,
-    // keduanya tidak saling deadlock karena urutan lock-nya konsisten.
     await client.query(
       `SELECT id FROM products
        WHERE id IN (SELECT product_id FROM order_items WHERE order_id = $1)
@@ -64,9 +60,8 @@ async function transitionOrder(client, orderId, toStatus, ctx = {}) {
     toStatus,
   ]);
 
-  // CATATAN untuk Fase 10 nanti: di titik inilah akan ditambahkan pemanggilan
-  // enqueueOrderEvent(client, orderId, `order.${toStatus}`, ctx.requestId) untuk menulis
-  // baris event ke outbox table. Belum dikerjakan sekarang — Kafka belum ada.
+  // BARU (Fase 10): tulis event ke outbox, DALAM transaksi pg yang sama.
+  await enqueueOrderEvent(client, orderId, `order.${toStatus}`, ctx.requestId);
 
   return { ok: true, changed: true, from, to: toStatus };
 }

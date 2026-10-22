@@ -1,9 +1,9 @@
 const pool = require("../config/pg");
 const supabase = require("../config/supabase");
 const { createPaymentTransaction } = require("../services/midtrans.service");
+const { enqueueOrderEvent } = require("../services/outbox.service"); // baru
 const { success, error } = require("../utils/response");
 
-// POST /api/checkout
 async function checkout(req, res, next) {
   const userId = req.user.id;
   let client;
@@ -30,7 +30,6 @@ async function checkout(req, res, next) {
     const lockedItems = [];
 
     for (const item of sortedItems) {
-      // DIUBAH: ikut SELECT is_active
       const result = await client.query(
         "SELECT id, name, stock, price, is_active FROM products WHERE id = $1 FOR UPDATE",
         [item.product_id],
@@ -47,8 +46,6 @@ async function checkout(req, res, next) {
 
       const product = result.rows[0];
 
-      // BARU: produk yang sudah di-soft-delete (misal baru dinonaktifkan admin SETELAH
-      // masuk cart orang) ditolak di titik paling kritis ini — bukan cuma di addItem.
       if (!product.is_active) {
         await client.query("ROLLBACK");
         return error(res, 409, `Produk "${product.name}" sudah tidak tersedia`);
@@ -99,14 +96,13 @@ async function checkout(req, res, next) {
       );
     }
 
-    // DIUBAH: dulu ini dilakukan lewat Supabase client SETELAH commit. Sekarang jadi
-    // bagian dari transaksi pg yang sama, sebelum COMMIT — kalau transaksi di-ROLLBACK
-    // karena alasan apa pun di atas, cart ikut tidak jadi kosong (konsisten).
     await client.query("DELETE FROM cart_items WHERE user_id = $1", [userId]);
+
+    // BARU (Fase 10): event order.created, masih DI DALAM transaksi yang sama — sebelum COMMIT.
+    await enqueueOrderEvent(client, order.id, "order.created", req.requestId);
 
     await client.query("COMMIT");
 
-    // --- Generate payment link Midtrans — tetap DI LUAR transaksi pg (sengaja, seperti Fase 5) ---
     let paymentInfo = null;
     try {
       const { data: customer } = await supabase

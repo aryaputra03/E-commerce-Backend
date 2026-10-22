@@ -103,21 +103,48 @@ async function getAllOrders(req, res, next) {
 // GET /api/admin/reports/summary
 async function getSalesSummary(req, res, next) {
   try {
-    const period = req.query.period === "daily" ? "day" : "month";
-    const result = await pool.query(
-      `SELECT date_trunc($1, created_at) AS period,
-              COUNT(*)::int AS orders,
-              COALESCE(SUM(total_amount), 0)::numeric(14, 2) AS revenue
+    const period = req.query.period === "monthly" ? "month" : "day";
+    const conditions = ["status IN ('paid', 'shipped', 'completed')"];
+    const params = [period];
+
+    if (req.query.start_date) {
+      params.push(req.query.start_date);
+      conditions.push(`created_at >= $${params.length}`);
+    }
+    if (req.query.end_date) {
+      params.push(req.query.end_date);
+      conditions.push(`created_at <= $${params.length}`);
+    }
+
+    const { rows } = await pool.query(
+      `SELECT to_char(
+                date_trunc($1::text, (created_at AT TIME ZONE 'UTC') AT TIME ZONE 'Asia/Jakarta'),
+                CASE WHEN $1::text = 'month' THEN 'YYYY-MM' ELSE 'YYYY-MM-DD' END
+              ) AS period,
+              COUNT(*)::int AS total_orders,
+              COALESCE(SUM(total_amount), 0)::numeric AS total_revenue
        FROM orders
-       WHERE status IN ('paid', 'shipped', 'completed')
-       GROUP BY date_trunc($1, created_at)
-       ORDER BY period DESC`,
-      [period],
+       WHERE ${conditions.join(" AND ")}
+       GROUP BY 1
+       ORDER BY 1`,
+      params,
     );
 
-    return success(res, 200, "Ringkasan penjualan", {
-      period: req.query.period || "monthly",
-      items: result.rows,
+    const totals = rows.reduce(
+      (sum, row) => ({
+        total_orders: sum.total_orders + row.total_orders,
+        total_revenue: sum.total_revenue + Number(row.total_revenue),
+      }),
+      { total_orders: 0, total_revenue: 0 },
+    );
+
+    return success(res, 200, "Ringkasan laporan penjualan", {
+      period_type: req.query.period === "monthly" ? "monthly" : "daily",
+      ...totals,
+      breakdown: rows.map((row) => ({
+        ...row,
+        total_revenue: Number(row.total_revenue),
+      })),
     });
   } catch (err) {
     next(err);
