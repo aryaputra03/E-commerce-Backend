@@ -28,7 +28,7 @@ async function handle(env) {
     }
 
     console.log(
-      `${new Date().toISOString()} [${env.requestId}] NOTIF ${type} order=${orderId} user=${userId} status=${status} total=${totalAmount}`,
+      `${new Date().toISOString()} [${env.requestId || "-"}] order.events ${type} ${orderId} -> notified (user=${userId} status=${status} total=${totalAmount})`,
     );
 
     if (NOTIFY_WEBHOOK_URL) {

@@ -1,5 +1,5 @@
 require("dotenv").config();
-const { randomUUID } = require("crypto"); // baru
+const { randomUUID } = require("crypto");
 const pool = require("../src/config/pg");
 const { transitionOrder } = require("../src/services/orderStatus.service");
 
@@ -15,20 +15,20 @@ async function expireOnce() {
   );
 
   for (const { id } of rows) {
+    const requestId = `expiry-${randomUUID()}`; // ditangkap di sini supaya bisa dipakai di log juga
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
       const result = await transitionOrder(client, id, "cancelled", {
         source: "expiry",
         onlyFrom: "pending",
-        requestId: `expiry-${randomUUID()}`, // baru — supaya event order.cancelled dari worker ini
-        // tetap bisa ditelusuri di log, walau tidak berasal dari request HTTP mana pun
+        requestId,
       });
       await client.query("COMMIT");
 
       if (result.ok && result.changed) {
         console.log(
-          `[expiry] Order ${id} dibatalkan karena kedaluwarsa, stok dikembalikan`,
+          `${new Date().toISOString()} [${requestId}] order.events order.cancelled ${id} -> expired`,
         );
       }
     } catch (err) {

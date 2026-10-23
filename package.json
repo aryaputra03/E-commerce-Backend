@@ -10,7 +10,9 @@
     "worker:relay": "node workers/outbox-relay.js",
     "worker:notification": "node workers/notification.js",
     "worker:indexer": "node workers/search-indexer.js",
-    "republish": "node scripts/republish-products.js"
+    "workers": "concurrently -n relay,notif,indexer,expiry -c blue,green,magenta,yellow \"npm:worker:relay\" \"npm:worker:notification\" \"npm:worker:indexer\" \"npm:worker:expiry\"",
+    "republish": "node scripts/republish-products.js",
+    "cleanup": "node scripts/cleanup-outbox.js"
   },
   "license": "MIT",
   "dependencies": {
@@ -30,6 +32,7 @@
     "pg": "^8.12.0"
   },
   "devDependencies": {
-    "nodemon": "^3.1.4"
+    "nodemon": "^3.1.4",
+    "concurrently": "^9.0.1"
   }
 }

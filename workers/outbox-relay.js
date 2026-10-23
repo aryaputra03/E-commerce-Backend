@@ -56,6 +56,14 @@ async function relayOnce(producer, batch = 50) {
       })),
     });
 
+    // BARU: log per event yang baru di-relay, supaya requestId bisa ditelusuri sampai ke sini.
+    for (const r of rows) {
+      const rid = (r.headers && r.headers["x-request-id"]) || "-";
+      console.log(
+        `${new Date().toISOString()} [${rid}] ${r.topic} ${r.payload.type || r.topic} ${r.key} -> relayed`,
+      );
+    }
+
     // Catatan jujur soal keandalan: kalau proses crash PERSIS di antara sendBatch berhasil
     // dan UPDATE ini, pesan itu akan terkirim ULANG di polling berikutnya (karena published_at
     // masih NULL). Ini "at-least-once delivery" — bukan bug, tapi konsekuensi sadar dari desain
